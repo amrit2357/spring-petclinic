@@ -89,5 +89,16 @@ public class Pet extends NamedEntity {
 	public void addVisit(Visit visit) {
 		getVisits().add(visit);
 	}
-	
+
+	public PetAttribute getAttributes() {
+		return attributes;
+	}
+
+	public void setAttributes(PetAttribute attributes) {
+		this.attributes = attributes;
+		if (this.attributes != null) {
+			this.attributes.setPet(this);
+		}
+	}
+
 }
