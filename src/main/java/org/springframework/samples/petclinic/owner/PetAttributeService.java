@@ -1,5 +1,6 @@
 package org.springframework.samples.petclinic.owner;
 
+import org.springframework.samples.petclinic.system.errors.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,4 +19,36 @@ public class PetAttributeService {
     public PetAttribute findPetAttributesByPetId(Integer petId) {
         return petAttributeRepository.findByPetId(petId).orElse(null);
     }
+
+
+    @Transactional
+    public PetAttribute savePetAttributesToDb(Pet pet, PetAttribute attributesToSave) {
+
+        PetAttribute existing = petAttributeRepository.findByPetId(pet.getId()).orElse(null);
+        if (existing != null) {
+            existing.setTemperament(attributesToSave.getTemperament());
+            existing.setLengthCm(attributesToSave.getLengthCm());
+            existing.setWeightKg(attributesToSave.getWeightKg());
+            return petAttributeRepository.save(existing);
+        }
+
+        attributesToSave.setPet(pet);
+
+        return petAttributeRepository.save(attributesToSave); // Save to DB
+    }
+
+    @Transactional
+    public PetAttribute savePetAttributes(Integer ownerId, Integer petId, PetAttribute attributesToSave) {
+        Owner owner = ownerRepository.findById(ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Owner not found with id: " + ownerId));
+
+        Pet pet = owner.getPet(petId);
+        // Raise excetion if not found
+        if (pet == null) {
+            throw new ResourceNotFoundException("Pet not found with id: " + petId + " for owner " + ownerId);
+        }
+
+        return savePetAttributesToDb(pet, attributesToSave); // call
+    }
+
 }
