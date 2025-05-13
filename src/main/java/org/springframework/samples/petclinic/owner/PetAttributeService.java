@@ -23,7 +23,9 @@ public class PetAttributeService {
 
     @Transactional
     public PetAttribute savePetAttributesToDb(Pet pet, PetAttribute attributesToSave) {
-
+    if (pet == null || attributesToSave == null) {
+            throw new IllegalArgumentException("attributes must no null");
+        }
         PetAttribute existing = petAttributeRepository.findByPetId(pet.getId()).orElse(null);
         if (existing != null) {
             existing.setTemperament(attributesToSave.getTemperament());
