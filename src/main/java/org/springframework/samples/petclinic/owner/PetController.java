@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Optional;
 
+import org.springframework.samples.petclinic.system.errors.ResourceNotFoundException;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.ModelMap;
 import org.springframework.util.StringUtils;
@@ -30,9 +31,9 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import jakarta.validation.Valid;
-import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 /**
  * @author Juergen Hoeller
@@ -66,17 +67,21 @@ class PetController {
 	}
 
 	@ModelAttribute("pet")
-	public Pet findPet(@PathVariable("ownerId") int ownerId,
-			@PathVariable(name = "petId", required = false) Integer petId) {
-
+	public Pet findPet(Owner owner, @PathVariable(name = "petId", required = false) Integer petId) {
 		if (petId == null) {
-			return new Pet();
+			Pet newPet = new Pet();
+			newPet.setAttributes(new PetAttribute()); 
+			return newPet;
+		} else {
+			Pet pet = owner.getPet(petId);
+			if (pet == null) {
+				throw new ResourceNotFoundException("Pet not found with id: " + petId + " for owner " + owner.getId());
+			}
+			if (pet.getAttributes() == null) {
+				pet.setAttributes(new PetAttribute());
+			}
+			return pet;
 		}
-
-		Optional<Owner> optionalOwner = this.owners.findById(ownerId);
-		Owner owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException(
-				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct "));
-		return owner.getPet(petId);
 	}
 
 	@InitBinder("owner")
@@ -90,32 +95,43 @@ class PetController {
 	}
 
 	@GetMapping("/pets/new")
-	public String initCreationForm(Owner owner, ModelMap model) {
-		Pet pet = new Pet();
+	public String initCreationForm(Owner owner, @ModelAttribute Pet pet, ModelMap model) {
 		owner.addPet(pet);
 		return VIEWS_PETS_CREATE_OR_UPDATE_FORM;
 	}
 
 	@PostMapping("/pets/new")
-	public String processCreationForm(Owner owner, @Valid Pet pet, BindingResult result,
+	public String processCreationForm(Owner owner, @Valid @ModelAttribute("pet") Pet pet, BindingResult result,
 			RedirectAttributes redirectAttributes) {
-
-		if (StringUtils.hasText(pet.getName()) && pet.isNew() && owner.getPet(pet.getName(), true) != null)
-			result.rejectValue("name", "duplicate", "already exists");
-
+		if (pet.isNew()) {
+		    owner.addPet(pet);
+		}
+		if (StringUtils.hasText(pet.getName()) && pet.isNew() && owner.getPet(pet.getName(), true) != null) {
+			Pet existingPetWithSameName = owner.getPet(pet.getName(), true);
+			if (existingPetWithSameName != null && existingPetWithSameName.isNew() == pet.isNew()) {
+			    result.rejectValue("name", "duplicate", "already exists");
+			}
+		}
 		LocalDate currentDate = LocalDate.now();
 		if (pet.getBirthDate() != null && pet.getBirthDate().isAfter(currentDate)) {
 			result.rejectValue("birthDate", "typeMismatch.birthDate");
+		}
+		if (pet.getAttributes() != null) {
+            PetAttribute attrs = pet.getAttributes();
+            if (StringUtils.hasText(attrs.getTemperament()) || attrs.getLengthCm() != null || attrs.getWeightKg() != null) {
+                attrs.setPet(pet);
+            } else {
+                pet.setAttributes(null);
+            }
 		}
 
 		if (result.hasErrors()) {
 			return VIEWS_PETS_CREATE_OR_UPDATE_FORM;
 		}
-
-		owner.addPet(pet);
-		this.owners.save(owner);
+        
+		this.owners.save(owner); 
 		redirectAttributes.addFlashAttribute("message", "New Pet has been Added");
-		return "redirect:/owners/{ownerId}";
+		return "redirect:/owners/" + owner.getId();
 	}
 
 	@GetMapping("/pets/{petId}/edit")
@@ -124,50 +140,36 @@ class PetController {
 	}
 
 	@PostMapping("/pets/{petId}/edit")
-	public String processUpdateForm(Owner owner, @Valid Pet pet, BindingResult result,
+	public String processUpdateForm(@Valid @ModelAttribute("pet") Pet pet, BindingResult result, Owner owner, 
 			RedirectAttributes redirectAttributes) {
 
 		String petName = pet.getName();
-
-		// checking if the pet name already exists for the owner
 		if (StringUtils.hasText(petName)) {
-			Pet existingPet = owner.getPet(petName, false);
-			if (existingPet != null && !existingPet.getId().equals(pet.getId())) {
+			Pet existingPetWithSameName = owner.getPet(petName, false);
+			if (existingPetWithSameName != null && !existingPetWithSameName.getId().equals(pet.getId())) {
 				result.rejectValue("name", "duplicate", "already exists");
 			}
 		}
-
 		LocalDate currentDate = LocalDate.now();
 		if (pet.getBirthDate() != null && pet.getBirthDate().isAfter(currentDate)) {
 			result.rejectValue("birthDate", "typeMismatch.birthDate");
 		}
 
+        if (pet.getAttributes() != null) {
+            PetAttribute attrs = pet.getAttributes();
+            if (StringUtils.hasText(attrs.getTemperament()) || attrs.getLengthCm() != null || attrs.getWeightKg() != null) {
+                 attrs.setPet(pet);
+            } else {
+                pet.setAttributes(null);
+            }
+        }
+
 		if (result.hasErrors()) {
 			return VIEWS_PETS_CREATE_OR_UPDATE_FORM;
 		}
 
-		updatePetDetails(owner, pet);
-		redirectAttributes.addFlashAttribute("message", "Pet details has been edited");
-		return "redirect:/owners/{ownerId}";
-	}
-
-	/**
-	 * Updates the pet details if it exists or adds a new pet to the owner.
-	 * @param owner The owner of the pet
-	 * @param pet The pet with updated details
-	 */
-	private void updatePetDetails(Owner owner, Pet pet) {
-		Pet existingPet = owner.getPet(pet.getId());
-		if (existingPet != null) {
-			// Update existing pet's properties
-			existingPet.setName(pet.getName());
-			existingPet.setBirthDate(pet.getBirthDate());
-			existingPet.setType(pet.getType());
-		}
-		else {
-			owner.addPet(pet);
-		}
 		this.owners.save(owner);
+		redirectAttributes.addFlashAttribute("message", "Pet details has been edited");
+		return "redirect:/owners/" + owner.getId();
 	}
-
 }
